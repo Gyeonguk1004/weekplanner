@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>위크플래너</title>
+<meta name="description" content="월요일부터 일요일까지 한 주의 할 일을 적고, 끝낸 일은 줄을 긋는 플래너">
+<meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="위크플래너">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap">
+<style>
+/* Layout: one planner sheet. Header, then a 3-pane track (prev / current / next) that drags sideways.
+   Week = Mon–Fri columns + a Sat/Sun stacked column on computer, 7 stacked rows on phone. Month = 7-column calendar grid. */
+:root{
+  --bg:#FAF9F5; --surface:#FFFFFF; --sunk:#F2F0E8; --hover:#F6F4EE;
+  --line:#E7E4DA; --line-strong:#D3CFC2;
+  --fg:#1F1E1D; --fg-2:#5B5A55; --fg-3:#8D8B84;
+  --accent:#C96442; --accent-fg:#FFFFFF; --accent-soft:#F5E6DD;
+  --sat:#3D62A6; --sun:#B6463B;
+  --ok:#5B8A5F; --warn:#B27B2E; --err:#B6463B;
+  --shadow:0 1px 2px rgba(31,30,29,.05), 0 6px 20px rgba(31,30,29,.04);
+  --shadow-sm:0 1px 2px rgba(31,30,29,.10);
+  --f-display:"Source Serif 4","Noto Serif KR","Apple SD Gothic Neo",Georgia,serif;
+  --f-ui:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --fs-task:14.5px; --fs-sub:13.2px;
+  color-scheme:light;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#262624; --surface:#30302E; --sunk:#2A2A28; --hover:#383835;
+    --line:#3E3D39; --line-strong:#56544E;
+    --fg:#F4F3EE; --fg-2:#C4C1B7; --fg-3:#918F87;
+    --accent:#D97757; --accent-fg:#1F1E1D; --accent-soft:#45322A;
+    --sat:#90AAE2; --sun:#E8897D;
+    --ok:#8DBB8F; --warn:#D9A65C; --err:#E8897D;
+    --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 20px rgba(0,0,0,.18);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+img{max-width:100%}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Boot / setup / login */
+.screen{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding-block:32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.boot{color:var(--fg-3);font-size:14px}
+.card{width:100%;max-width:380px;display:flex;flex-direction:column;gap:16px;padding:28px 24px;border-radius:18px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.card h1{margin:0;font-family:var(--f-display);font-weight:500;font-size:32px;line-height:1.15}
+.card p{margin:0;color:var(--fg-2);font-size:14.5px;line-height:1.6}
+.card code{font-size:13px;background:var(--sunk);padding:1px 5px;border-radius:5px}
+.btn{height:46px;width:100%;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);font-size:15px;cursor:pointer}
+.btn:hover:not(:disabled){background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.primary:hover:not(:disabled){filter:brightness(1.05);background:var(--accent)}
+.btn:disabled{opacity:.6;cursor:default}
+.or{display:flex;align-items:center;gap:10px;color:var(--fg-3);font-size:12.5px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.email-form{display:flex;flex-direction:column;gap:12px}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--fg-2)}
+.field input{height:46px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);padding:0 12px;font:inherit;font-size:16px;color:var(--fg)}
+.field input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.msg{margin:0;font-size:13.5px;line-height:1.5}
+.msg.err{color:var(--err)}
+.msg.ok{color:var(--ok)}
+.login-links{display:flex;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
+.link{border:0;background:none;padding:4px 0;color:var(--fg-2);font-size:13.5px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.link:hover{color:var(--fg)}
+
+.app{max-width:1440px;margin:0 auto;padding-block:20px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* Header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 20px}
+.heading{min-width:0}
+.eyebrow{margin:0 0 6px;font-size:13px;color:var(--fg-3);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.top h1{margin:0;font-family:var(--f-display);font-weight:500;font-size:clamp(28px,4.2vw,36px);line-height:1.12;letter-spacing:-.01em;text-wrap:balance}
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.seg{display:inline-flex;padding:3px;border-radius:999px;background:var(--sunk);border:1px solid var(--line)}
+.seg button{border:0;background:transparent;color:var(--fg-2);font-size:14px;padding:6px 16px;border-radius:999px;cursor:pointer}
+.seg button[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:var(--shadow-sm)}
+.nav{display:inline-flex;align-items:center;gap:6px}
+.icon-btn{width:36px;height:36px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg-2);display:grid;place-items:center;cursor:pointer;padding:0}
+.icon-btn:hover{background:var(--hover);color:var(--fg)}
+.pill{height:36px;padding:0 15px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-size:14px;cursor:pointer}
+.pill:hover:not(:disabled){background:var(--hover)}
+.pill:disabled{color:var(--fg-3);cursor:default}
+@media (max-width:719px){ .controls{width:100%;justify-content:space-between} }
+
+.status{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin:18px 0 14px;font-size:13px;color:var(--fg-2)}
+.progress{display:flex;align-items:center;gap:10px;font-variant-numeric:tabular-nums}
+.bar{width:120px;height:4px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:inherit;transition:width .35s ease}
+.status-r{display:flex;align-items:center;flex-wrap:wrap;gap:4px 14px;min-width:0}
+.sync{display:inline-flex;align-items:center;gap:7px;color:var(--fg-3)}
+.sync i{width:7px;height:7px;border-radius:50%;background:var(--fg-3);flex:none}
+.sync[data-state="synced"] i{background:var(--ok)}
+.sync[data-state="saving"] i{background:var(--accent);animation:pulse 1s ease-in-out infinite}
+.sync[data-state="offline"] i{background:var(--warn)}
+.sync[data-state="error"] i{background:var(--err)}
+@keyframes pulse{50%{opacity:.3}}
+.acct{display:inline-flex;align-items:center;gap:8px;color:var(--fg-3);min-width:0}
+.acct span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:24ch}
+.acct .link{font-size:13px;padding:0}
+
+.hint{display:flex;align-items:flex-start;gap:12px;margin:0 0 14px;padding:12px 12px 12px 16px;border-radius:12px;background:var(--accent-soft);color:var(--fg);font-size:13.5px;line-height:1.6}
+.hint ul{margin:0;padding-left:18px;flex:1;min-width:0}
+.hint button{flex:none;border:0;background:var(--surface);color:var(--fg);font-size:13px;padding:5px 12px;border-radius:999px;cursor:pointer;box-shadow:var(--shadow-sm)}
+
+/* Slider */
+.viewport{position:relative;margin-inline:-8px;overflow:hidden;overflow:clip;touch-action:pan-y;cursor:grab}
+.viewport::before,.viewport::after{content:"";position:absolute;top:0;bottom:0;width:44px;pointer-events:none;opacity:0;transition:opacity .2s;z-index:5}
+.viewport::before{left:0;background:linear-gradient(90deg,var(--accent-soft),transparent)}
+.viewport::after{right:0;background:linear-gradient(270deg,var(--accent-soft),transparent)}
+.viewport.edge-l::before,.viewport.edge-r::after{opacity:1}
+.track{display:flex;align-items:flex-start;transform:translateX(-100%);will-change:transform}
+.pane{flex:0 0 100%;min-width:0;padding:2px 8px 10px}
+.dragging,.dragging *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important}
+.copying,.copying *{cursor:copy!important;user-select:none!important;-webkit-user-select:none!important}
+
+/* Week — phone/tablet: stacked rows */
+.week{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:0 16px;box-shadow:var(--shadow)}
+.day{display:grid;grid-template-columns:44px minmax(0,1fr);column-gap:14px;padding:14px 0 10px;border-top:1px solid var(--line);cursor:auto;transition:background-color .15s}
+.day:first-child{border-top:0}
+.dh{grid-column:1;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:center;gap:3px;padding-top:2px}
+.mo{font-size:11px;color:var(--fg-3);line-height:1}
+.mo:empty{display:none}
+.dow{font-size:12px;color:var(--fg-3);line-height:1.2}
+.num{font-family:var(--f-display);font-size:19px;font-weight:500;line-height:1;width:34px;height:34px;display:grid;place-items:center;border-radius:50%;font-variant-numeric:tabular-nums}
+.cnt{font-size:11.5px;color:var(--fg-3);font-variant-numeric:tabular-nums;line-height:1.2}
+.cnt:empty{display:none}
+.items{grid-column:2;list-style:none;margin:0;padding:0;min-width:0}
+.add{grid-column:2}
+
+.day.sat .dow,.day.sat .num{color:var(--sat)}
+.day.sun .dow,.day.sun .num{color:var(--sun)}
+.day.past .num{opacity:.5}
+.day.today .num{background:var(--accent);color:var(--accent-fg);opacity:1}
+.day.today .dow{color:var(--accent)}
+.day.flash{animation:flash 1.4s ease}
+@keyframes flash{0%,35%{background:var(--accent-soft)}100%{background:transparent}}
+.day.drop{background:var(--accent-soft)}
+
+/* Items */
+.item{position:relative;display:flex;align-items:flex-start;gap:10px;padding:6px 0}
+.item.src{opacity:.45}
+.cb{-webkit-appearance:none;appearance:none;margin:2px 0 0;flex:none;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line-strong);background:var(--surface);display:grid;place-content:center;cursor:pointer;transition:background-color .15s,border-color .15s}
+.cb::before{content:"";width:9px;height:5px;border-left:2px solid var(--accent-fg);border-bottom:2px solid var(--accent-fg);transform:translateY(-1px) rotate(-45deg) scale(.4);opacity:0;transition:transform .18s ease,opacity .12s}
+.cb:hover:not(:disabled){border-color:var(--accent)}
+.cb:checked{background:var(--accent);border-color:var(--accent)}
+.cb:checked::before{opacity:1;transform:translateY(-1px) rotate(-45deg) scale(1)}
+.cb:disabled{cursor:default}
+.text{flex:1;min-width:0;cursor:pointer;overflow-wrap:anywhere;font-size:var(--fs-task);line-height:1.45;color:var(--fg)}
+.t{background-image:linear-gradient(var(--fg-2),var(--fg-2));background-repeat:no-repeat;background-position:0 56%;background-size:0% 1.5px;transition:background-size .32s cubic-bezier(.3,.7,.2,1),color .2s}
+.item.done .t{background-size:100% 1.5px;color:var(--fg-3)}
+.lk{display:inline-block;margin-left:6px;font-size:11.5px;color:var(--accent);white-space:nowrap;font-variant-numeric:tabular-nums}
+.lk:empty{display:none}
+
+/* Sub-tasks: about one space further in, 1pt smaller */
+.item.sub{padding:3px 0 3px 10px;gap:8px}
+.item.sub .cb{width:15px;height:15px;border-radius:4px;margin-top:2.5px}
+.item.sub .cb::before{width:7px;height:4px;border-left-width:1.8px;border-bottom-width:1.8px}
+.item.sub .text{font-size:var(--fs-sub)}
+.cb-ph{flex:none;width:15px;height:15px;margin-top:2.5px;border:1.5px dashed var(--line-strong);border-radius:4px}
+.subform-f{flex:1;min-width:0;display:flex}
+.subform-f input{flex:1;min-width:0;border:0;border-bottom:1px solid var(--accent);border-radius:0;background:transparent;color:var(--fg);font:inherit;font-size:var(--fs-sub);padding:0 0 2px;outline:none}
+.subform-f input::placeholder{color:var(--fg-3)}
+
+.acts{display:flex;flex:none;margin:-3px -6px 0 0;opacity:.55}
+.acts button{width:26px;height:26px;padding:0;border:0;background:transparent;color:var(--fg-3);border-radius:8px;display:grid;place-items:center;cursor:pointer}
+.acts button:hover{background:var(--hover);color:var(--fg)}
+.acts .del:hover{color:var(--err)}
+@media (hover:hover){
+  .acts{position:absolute;right:-6px;top:3px;margin:0;padding-left:18px;background:linear-gradient(90deg,transparent,var(--surface) 16px);opacity:0;transition:opacity .15s}
+  .item.sub .acts{top:0}
+  .item:hover .acts,.acts:focus-within{opacity:1}
+}
+@media (hover:none){ .item{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none} }
+
+.add{display:flex;align-items:center;gap:6px;padding-top:2px}
+.add input{flex:1;min-width:0;border:0;border-bottom:1px solid transparent;border-radius:0;background:transparent;color:var(--fg);font:inherit;font-size:var(--fs-task);padding:7px 0;outline:none;cursor:text}
+.add input::placeholder{color:var(--fg-3)}
+.add input:focus{border-bottom-color:var(--accent)}
+.add input:disabled{cursor:default}
+.add button{width:28px;height:28px;flex:none;padding:0;border-radius:8px;border:0;background:transparent;color:var(--fg-3);display:grid;place-items:center;cursor:pointer;transition:background-color .15s,color .15s}
+.add input:not(:placeholder-shown) + button{background:var(--accent);color:var(--accent-fg)}
+.add button:disabled{opacity:.4;cursor:default}
+
+/* Links between a task and its copies (earlier → later) */
+.links{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:2}
+.links .ln{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:round;opacity:.8}
+.links .ah{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+/* Week — computer: Mon–Fri in five columns, Sat and Sun stacked in the sixth */
+@media (min-width:880px){
+  .week{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:auto auto;gap:8px;background:none;border:0;padding:0;box-shadow:none;border-radius:0}
+  .day,.day:first-child{display:flex;flex-direction:column;min-height:216px;padding:12px 10px 8px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
+  .day:nth-child(-n+5){grid-row:1 / span 2;min-height:440px}
+  .day:nth-child(6){grid-column:6;grid-row:1}
+  .day:nth-child(7){grid-column:6;grid-row:2}
+  .dh{flex-direction:row;align-items:center;gap:6px;padding:0 0 10px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+  .num{order:-1;font-size:21px;width:34px;height:34px;margin-left:-4px}
+  .mo{order:1;font-size:12px}
+  .dow{font-size:13px}
+  .cnt{order:2;margin-left:auto}
+  .add{margin-top:auto}
+  .day.today{border-color:var(--accent)}
+  .day.drop{background:var(--accent-soft);border-color:var(--accent)}
+  .day.flash{animation-name:flashCard}
+  @keyframes flashCard{0%,35%{background:var(--accent-soft)}100%{background:var(--surface)}}
+}
+
+/* Month */
+.dow-row{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0 0 6px;padding:0;list-style:none;font-size:12.5px;color:var(--fg-3);text-align:center}
+.dow-row .sat{color:var(--sat)}
+.dow-row .sun{color:var(--sun)}
+.mgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+.mcell{border:0;margin:0;text-align:left;background:var(--surface);min-height:118px;padding:8px 9px;display:flex;flex-direction:column;gap:6px;cursor:pointer;min-width:0;border-radius:0}
+.mcell:hover{background:var(--hover)}
+.mcell.out{background:var(--sunk)}
+.mcell.out .mnum{opacity:.45}
+.mnum{font-family:var(--f-display);font-size:15px;font-weight:500;width:26px;height:26px;display:grid;place-items:center;border-radius:50%;margin:-3px 0 0 -4px;font-variant-numeric:tabular-nums;flex:none}
+.mcell.sat .mnum{color:var(--sat)}
+.mcell.sun .mnum{color:var(--sun)}
+.mcell.today .mnum{background:var(--accent);color:var(--accent-fg);opacity:1}
+.mlist{display:flex;flex-direction:column;gap:3px;min-width:0}
+.ml{display:block;position:relative;padding-left:9px;font-size:12px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg-2)}
+.ml::before{content:"";position:absolute;left:0;top:.52em;width:4px;height:4px;border-radius:50%;background:var(--accent)}
+.ml.done{color:var(--fg-3);text-decoration:line-through;text-decoration-color:var(--fg-3)}
+.ml.done::before{background:var(--line-strong)}
+.more{font-size:11.5px;color:var(--fg-3);padding-left:9px}
+.mdots{display:none;flex-wrap:wrap;justify-content:center;gap:3px;max-width:34px}
+.mdots i{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.mdots i.on{background:var(--line-strong)}
+@media (max-width:719px){
+  .mcell{min-height:66px;padding:6px 2px;align-items:center;gap:5px}
+  .mnum{margin:0;font-size:14px}
+  .mlist{display:none}
+  .mdots{display:flex}
+  .mgrid{border-radius:14px}
+}
+
+/* Copy drag */
+.ghost{position:fixed;left:0;top:0;z-index:30;pointer-events:none;display:flex;align-items:center;gap:8px;max-width:260px;padding:7px 12px 7px 9px;border-radius:10px;background:var(--surface);color:var(--fg);border:1px solid var(--accent);box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13.5px;white-space:nowrap}
+.ghost b{flex:none;width:18px;height:18px;border-radius:50%;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-size:13px;font-weight:600;line-height:1}
+.ghost span{overflow:hidden;text-overflow:ellipsis}
+.dropline{position:fixed;left:0;top:0;height:2px;border-radius:2px;background:var(--accent);z-index:29;pointer-events:none}
+
+/* Toast */
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;align-items:center;gap:14px;padding:10px 10px 10px 16px;border-radius:12px;background:var(--fg);color:var(--bg);font-size:14px;box-shadow:0 8px 28px rgba(0,0,0,.2);z-index:20;max-width:calc(100% - 32px)}
+.toast button{border:0;background:transparent;color:inherit;font-weight:600;text-decoration:underline;text-underline-offset:3px;padding:4px 6px;border-radius:6px;cursor:pointer;white-space:nowrap}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+
+<div class="screen" id="boot"><p class="boot" id="boot-msg">불러오는 중…</p></div>
+
+<main class="screen" id="setup" hidden>
+  <div class="card">
+    <h1>위크플래너</h1>
+    <p>아직 Firebase가 연결되지 않았어요. <code>firebase-config.js</code>에 Firebase 웹 앱 설정값을 붙여넣고 다시 올려 주세요. 순서는 <code>README.md</code>에 있어요.</p>
+  </div>
+</main>
+
+<main class="screen" id="login" hidden>
+  <div class="card">
+    <h1>위크플래너</h1>
+    <p>한 주의 할 일을 적고, 끝낸 일은 줄을 그어요. 컴퓨터와 휴대폰에서 같은 목록을 써요.</p>
+    <button type="button" class="btn" id="google-btn">Google 계정으로 계속하기</button>
+    <div class="or">또는 이메일로</div>
+    <form class="email-form" id="email-form" novalidate>
+      <label class="field">이메일<input type="email" id="login-email" name="email" autocomplete="email" inputmode="email" required></label>
+      <label class="field">비밀번호<input type="password" id="login-pw" name="password" autocomplete="current-password" minlength="6" required></label>
+      <p class="msg err" id="login-err" role="alert" hidden></p>
+      <p class="msg ok" id="login-ok" role="status" hidden></p>
+      <button type="submit" class="btn primary" id="email-submit">로그인</button>
+    </form>
+    <div class="login-links">
+      <button type="button" class="link" id="mode-toggle">처음이세요? 계정 만들기</button>
+      <button type="button" class="link" id="reset-btn">비밀번호 재설정</button>
+    </div>
+  </div>
+</main>
+
+<div class="app" id="app" hidden>
+  <header class="top">
+    <div class="heading">
+      <p class="eyebrow" id="eyebrow">&nbsp;</p>
+      <h1 id="title">위크플래너</h1>
+    </div>
+    <div class="controls">
+      <div class="seg" role="tablist" aria-label="보기">
+        <button type="button" role="tab" id="v-week" aria-selected="true">주간</button>
+        <button type="button" role="tab" id="v-month" aria-selected="false">월간</button>
+      </div>
+      <div class="nav">
+        <button type="button" class="icon-btn" id="prev" aria-label="지난주"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button type="button" class="pill" id="today">이번 주</button>
+        <button type="button" class="icon-btn" id="next" aria-label="다음 주"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+  </header>
+
+  <div class="status">
+    <div class="progress"><span id="ptext">&nbsp;</span><span class="bar" aria-hidden="true"><i id="pbar"></i></span></div>
+    <div class="status-r">
+      <div class="sync" id="sync" data-state="loading"><i></i><span>불러오는 중</span></div>
+      <div class="acct"><span id="acct-email"></span><button type="button" class="link" id="logout">로그아웃</button></div>
+    </div>
+  </div>
+
+  <div class="hint" id="hint" hidden>
+    <ul>
+      <li>요일 칸에 할 일을 적고 Enter를 누르세요. 체크하면 줄이 그어져요.</li>
+      <li>맨 앞에 띄어쓰기를 한 칸 넣으면 바로 위 할 일의 세부 업무가 돼요. 할 일 옆 ↳ 버튼으로도 넣을 수 있어요.</li>
+      <li id="tip-copy">Ctrl(Mac은 ⌘)을 누른 채 할 일을 다른 요일로 끌면 복사되고, 먼저 날짜에서 나중 날짜로 화살표가 이어져요. 화면 왼쪽·오른쪽 끝까지 끌고 가면 다른 주로 넘어가요.</li>
+      <li>빈 곳을 잡고 옆으로 끌거나 ‹ › 버튼을 누르면 지난주·다음 주로 넘어가요.</li>
+    </ul>
+    <button type="button" id="hint-close">알겠어요</button>
+  </div>
+
+  <ul class="dow-row" id="dowRow" hidden aria-hidden="true">
+    <li>월</li><li>화</li><li>수</li><li>목</li><li>금</li><li class="sat">토</li><li class="sun">일</li>
+  </ul>
+
+  <div class="viewport" id="viewport">
+    <div class="track" id="track">
+      <div class="pane" aria-hidden="true"></div>
+      <div class="pane"></div>
+      <div class="pane" aria-hidden="true"></div>
+    </div>
+  </div>
+</div>
+
+<div class="dropline" id="dropline" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span id="toast-msg"></span>
+  <button type="button" id="toast-btn">되돌리기</button>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

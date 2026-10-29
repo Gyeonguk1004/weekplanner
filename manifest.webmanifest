@@ -1,0 +1,20 @@
+{
+  "name": "위크플래너",
+  "short_name": "위크플래너",
+  "description": "월요일부터 일요일까지 한 주의 할 일을 적고, 끝낸 일은 줄을 긋는 플래너",
+  "lang": "ko",
+  "start_url": "./#week",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FAF9F5",
+  "theme_color": "#FAF9F5",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "이번 주", "short_name": "이번 주", "url": "./#week", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "이번 달", "short_name": "이번 달", "url": "./#month", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
