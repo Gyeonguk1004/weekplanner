@@ -611,7 +611,7 @@ const HINT_KEY = 'wp.hint2';
 let hintClosed = false;
 try { hintClosed = localStorage.getItem(HINT_KEY) === '1'; } catch (e) {}
 if (TOUCH) {
-  $('#tip-menu').textContent = '할 일 옆 ⋯ 버튼을 누르면 다음 날이나 다음 주로 넘길 수 있어요. 넘기고 남은 할 일은 흐려지고, 화살표로 이어져요.';
+  $('#tip-menu').textContent = '할 일 옆 ⋯ 버튼을 누르면 다음 날이나 다음 주로 넘길 수 있어요. 복사한 할 일끼리는 화살표로 이어져요.';
   $('#tip-copy').textContent = '할 일을 길게 누른 채 다른 요일로 끌어도 복사돼요. 화면 양쪽 끝으로 끌고 가면 지난주·다음 주로 넘어가요.';
 }
 

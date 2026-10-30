@@ -180,9 +180,9 @@ button{font:inherit;color:inherit}
 /* Items */
 .item{position:relative;display:flex;align-items:flex-start;gap:10px;padding:6px 0;transition:opacity .2s}
 .item.src{opacity:.45}
-/* A task that was copied forward fades back; the copy carries on */
-.item.moved{opacity:.42}
-.item.moved:hover,.item.moved:focus-within{opacity:.85}
+/* Finished tasks fade back, checkbox included; open tasks stay full strength on every day */
+.item.done{opacity:.55}
+.item.done:hover,.item.done:focus-within{opacity:.85}
 /* Completed tasks sink below the open ones; a faint rule marks where they start */
 .item:not(.sunk) + .item.sunk{margin-top:4px;padding-top:10px;border-top:1px dashed var(--line)}
 .cb{-webkit-appearance:none;appearance:none;margin:2px 0 0;flex:none;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line-strong);background:var(--surface);display:grid;place-content:center;cursor:pointer;transition:background-color .15s,border-color .15s}
@@ -193,7 +193,7 @@ button{font:inherit;color:inherit}
 .cb:disabled{cursor:default}
 .text{flex:1;min-width:0;cursor:pointer;overflow-wrap:anywhere;font-size:var(--fs-task);line-height:1.45;color:var(--fg)}
 .t{background-image:linear-gradient(var(--fg-2),var(--fg-2));background-repeat:no-repeat;background-position:0 56%;background-size:0% 1.5px;transition:background-size .32s cubic-bezier(.3,.7,.2,1),color .2s}
-.item.done .t{background-size:100% 1.5px;color:var(--fg-3)}
+.item.done .t{background-size:100% 1.5px;color:var(--fg-2)}
 .lk{display:inline-block;margin:0 0 0 4px;padding:0 5px;border:0;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:11.5px;line-height:1.6;white-space:nowrap;font-variant-numeric:tabular-nums;vertical-align:1px;cursor:pointer}
 .lk:hover{background:var(--accent);color:var(--accent-fg)}
 .lk:empty{display:none}
@@ -293,12 +293,10 @@ button{font:inherit;color:inherit}
 .ml::before{content:"";position:absolute;left:0;top:.52em;width:4px;height:4px;border-radius:50%;background:var(--accent)}
 .ml.done{color:var(--fg-3);text-decoration:line-through;text-decoration-color:var(--fg-3)}
 .ml.done::before{background:var(--line-strong)}
-.ml.moved{opacity:.45}
 .more-n{font-size:11.5px;color:var(--fg-3);padding-left:9px}
 .mdots{display:none;flex-wrap:wrap;justify-content:center;gap:3px;max-width:34px}
 .mdots i{width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .mdots i.on{background:var(--line-strong)}
-.mdots i.mv{opacity:.4}
 @media (max-width:719px){
   .mcell{min-height:66px;padding:6px 2px;align-items:center;gap:5px}
   .mnum{margin:0;font-size:14px}
@@ -401,9 +399,9 @@ button{font:inherit;color:inherit}
 
   <div class="hint" id="hint" hidden>
     <ul>
-      <li>요일 칸에 할 일을 적고 Enter를 누르세요. 체크하면 줄이 그어지고 아래로 내려가요.</li>
+      <li>요일 칸에 할 일을 적고 Enter를 누르세요. 체크하면 줄이 그어지고 흐려진 채 아래로 내려가요.</li>
       <li>맨 앞에 띄어쓰기를 한 칸 넣으면 바로 위 할 일의 세부 업무가 돼요. 할 일 옆 ↳ 버튼으로도 넣을 수 있어요.</li>
-      <li id="tip-menu">할 일 옆 복사 버튼을 누르면 다음 날이나 다음 주로 넘길 수 있어요. 넘기고 남은 할 일은 흐려지고, 화살표로 이어져요.</li>
+      <li id="tip-menu">할 일 옆 복사 버튼을 누르면 다음 날이나 다음 주로 넘길 수 있어요. 복사한 할 일끼리는 화살표로 이어져요.</li>
       <li id="tip-copy">Ctrl(Mac은 ⌘)을 누른 채 할 일을 다른 요일로 끌어도 복사돼요. 화면 양쪽 끝으로 끌고 가면 지난주·다음 주로 넘어가요.</li>
       <li>빈 곳을 잡고 옆으로 끌거나 ‹ › 버튼을 누르면 지난주·다음 주로 넘어가요.</li>
     </ul>
