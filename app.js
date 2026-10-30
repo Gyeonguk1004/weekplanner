@@ -323,7 +323,7 @@ function buildWeek(p, interactive) {
   for (let i = 0; i < 7; i++) {
     const sec = document.createElement('section');
     sec.className = 'day';
-    sec.innerHTML = `<header class="dh"><span class="mo"></span><span class="dow"></span><span class="num"></span><span class="cnt"></span></header><ul class="items"></ul><form class="add" autocomplete="off"><input type="text" maxlength="300" aria-label="할 일 추가" placeholder="할 일 추가"><button type="submit" aria-label="추가">${PLUS}</button></form>`;
+    sec.innerHTML = `<header class="dh"><span class="mo"></span><span class="dow"></span><span class="tdy">Today</span><span class="num"></span><span class="cnt"></span></header><ul class="items"></ul><form class="add" autocomplete="off"><input type="text" maxlength="300" aria-label="할 일 추가" placeholder="할 일 추가"><button type="submit" aria-label="추가">${PLUS}</button></form>`;
     if (interactive) { const inp = sec.querySelector('input'); inp.id = 'add-' + i; inp.name = 'add-' + i; }
     wrap.appendChild(sec);
   }
@@ -651,10 +651,21 @@ function renderHeader() {
 
 function fitHeight() { vp.style.height = panes[1].offsetHeight + 'px'; }
 
+// On a computer the week fills exactly the space left under the header (and the tips box,
+// when it is open), so every day stays inside the window at any window height.
+function sizeWeek() {
+  const root = document.documentElement;
+  if (screens.app.hidden || !WIDE.matches || state.view !== 'week') { root.style.removeProperty('--week-h'); return; }
+  const top = vp.getBoundingClientRect().top + scrollY;
+  const h = Math.round(Math.min(980, Math.max(360, innerHeight - top - 2 - 16)));
+  if (root.style.getPropertyValue('--week-h') !== `${h}px`) root.style.setProperty('--week-h', `${h}px`);
+}
+
 function render() {
   if (screens.app.hidden) return;
   computeChains();
   renderHeader();
+  sizeWeek();
   panes.forEach((p, i) => renderPane(p, paneAnchor(i - 1), i === 1));
   fitHeight();
   scheduleLinks();
@@ -663,8 +674,11 @@ function render() {
 }
 
 if ('ResizeObserver' in window) new ResizeObserver(() => { fitHeight(); scheduleLinks(); }).observe(panes[1]);
-window.addEventListener('resize', () => { scheduleLinks(); closeMenu(false); });
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { fitHeight(); scheduleLinks(); });
+window.addEventListener('resize', () => { sizeWeek(); scheduleLinks(); closeMenu(false); });
+WIDE.addEventListener ? WIDE.addEventListener('change', () => render()) : WIDE.addListener(() => render());
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { sizeWeek(); fitHeight(); scheduleLinks(); });
+// the header can change height (status line wrapping, tips box): keep the week fitted
+if ('ResizeObserver' in window) new ResizeObserver(() => sizeWeek()).observe($('.top'));
 // a day's list scrolled: arrows follow, an open menu stays with its button
 track.addEventListener('scroll', () => { scheduleLinks(); placeMenu(); }, true);
 window.addEventListener('scroll', () => placeMenu(), { passive: true });
@@ -759,6 +773,7 @@ $('#v-month').addEventListener('click', () => { if (state.view !== 'month') setV
 $('#hint-close').addEventListener('click', () => {
   hintClosed = true; $('#hint').hidden = true;
   try { localStorage.setItem(HINT_KEY, '1'); } catch (e) {}
+  sizeWeek();
 });
 window.addEventListener('hashchange', () => {
   const v = location.hash === '#month' ? 'month' : location.hash === '#week' ? 'week' : null;

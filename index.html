@@ -31,6 +31,7 @@
   --shadow-sm:0 1px 2px rgba(31,30,29,.10);
   --shadow-pop:0 12px 32px rgba(31,30,29,.16), 0 2px 6px rgba(31,30,29,.06);
   --scroll-sh:rgba(31,30,29,.13);
+  --today-bg:#FCF2EC;
   --f-display:"Source Serif 4","Noto Serif KR","Apple SD Gothic Neo",Georgia,serif;
   --f-ui:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
   --fs-task:14.5px; --fs-sub:13.2px;
@@ -50,6 +51,7 @@
     --shadow-sm:0 1px 2px rgba(0,0,0,.35);
     --shadow-pop:0 12px 32px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.3);
     --scroll-sh:rgba(0,0,0,.45);
+    --today-bg:#3A2E29;
     color-scheme:dark;
   }
 }
@@ -135,8 +137,14 @@ button{font:inherit;color:inherit}
 
 /* Week — phone/tablet: stacked rows */
 .week{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:0 16px;box-shadow:var(--shadow)}
-.day{display:grid;grid-template-columns:44px minmax(0,1fr);column-gap:14px;padding:14px 0 8px;border-top:1px solid var(--line);cursor:auto;transition:background-color .15s}
+.day{--fill:var(--surface);display:grid;grid-template-columns:44px minmax(0,1fr);column-gap:14px;padding:14px 0 8px;border-top:1px solid var(--line);cursor:auto;transition:background-color .15s}
 .day:first-child{border-top:0}
+/* Today: a warm tint across the whole day, plus a "Today" tag next to the weekday */
+.day.today{--fill:var(--today-bg);background:var(--fill);margin-inline:-16px;padding-inline:16px}
+.day.today:first-child{border-radius:15px 15px 0 0}
+.day.today:last-child{border-radius:0 0 15px 15px}
+.tdy{display:none}
+.day.today .tdy{display:inline-block;padding:3px 7px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-size:10.5px;font-weight:600;line-height:1;letter-spacing:.02em}
 .dh{grid-column:1;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:center;gap:3px;padding-top:2px}
 .mo{font-size:11px;color:var(--fg-3);line-height:1}
 .mo:empty{display:none}
@@ -149,8 +157,8 @@ button{font:inherit;color:inherit}
 /* Each day's list scrolls on its own once it gets long; soft shadows show there is more */
 .items{grid-column:2;list-style:none;margin:0 -4px;padding:0 4px;min-width:0;max-height:22rem;overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;
   background:
-    linear-gradient(var(--surface) 35%, transparent) center top / 100% 20px no-repeat local,
-    linear-gradient(transparent, var(--surface) 65%) center bottom / 100% 20px no-repeat local,
+    linear-gradient(var(--fill) 35%, transparent) center top / 100% 20px no-repeat local,
+    linear-gradient(transparent, var(--fill) 65%) center bottom / 100% 20px no-repeat local,
     radial-gradient(farthest-side at 50% 0, var(--scroll-sh), transparent) center top / 100% 7px no-repeat scroll,
     radial-gradient(farthest-side at 50% 100%, var(--scroll-sh), transparent) center bottom / 100% 7px no-repeat scroll;
 }
@@ -165,6 +173,8 @@ button{font:inherit;color:inherit}
 .day.today .dow{color:var(--accent)}
 .day.flash{animation:flash 1.4s ease}
 @keyframes flash{0%,35%{background:var(--accent-soft)}100%{background:transparent}}
+.day.today.flash{animation-name:flashToday}
+@keyframes flashToday{0%,35%{background:var(--accent-soft)}100%{background:var(--today-bg)}}
 .day.drop{background:var(--accent-soft)}
 
 /* Items */
@@ -204,7 +214,7 @@ button{font:inherit;color:inherit}
 .acts .del:hover{color:var(--err)}
 .acts .more{display:none}
 @media (hover:hover){
-  .acts{position:absolute;right:0;top:3px;margin:0;padding-left:18px;background:linear-gradient(90deg,transparent,var(--surface) 16px);opacity:0;transition:opacity .15s;pointer-events:none}
+  .acts{position:absolute;right:0;top:3px;margin:0;padding-left:18px;background:linear-gradient(90deg,transparent,var(--fill,var(--surface)) 16px);opacity:0;transition:opacity .15s;pointer-events:none}
   .item.sub .acts{top:0}
   .item:hover .acts,.acts:focus-within,.item.menuing .acts{opacity:1}
   .item:hover .acts button,.acts:focus-within button,.item.menuing .acts button{pointer-events:auto}
@@ -245,8 +255,9 @@ button{font:inherit;color:inherit}
 
 /* Week — computer: Mon–Fri in five columns, Sat and Sun stacked in the sixth. Fixed height; lists scroll. */
 @media (min-width:880px){
-  .week{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:8px;height:clamp(440px,calc(100vh - 200px),980px);height:clamp(440px,calc(100dvh - 200px),980px);background:none;border:0;padding:0;box-shadow:none;border-radius:0}
-  .day,.day:first-child{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:12px 10px 6px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
+  /* --week-h is set by app.js to the space left under the header, so the week always fits the window */
+  .week{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:8px;height:var(--week-h,clamp(440px,calc(100vh - 200px),980px));background:none;border:0;padding:0;box-shadow:none;border-radius:0}
+  .day,.day:first-child,.day.today{display:flex;flex-direction:column;min-height:0;overflow:hidden;margin:0;padding:12px 10px 6px;border:1px solid var(--line);border-radius:14px;background:var(--fill);box-shadow:var(--shadow)}
   .day:nth-child(-n+5){grid-row:1 / span 2}
   .day:nth-child(6){grid-column:6;grid-row:1}
   .day:nth-child(7){grid-column:6;grid-row:2}
@@ -257,10 +268,10 @@ button{font:inherit;color:inherit}
   .cnt{order:2;margin-left:auto}
   .items{flex:0 1 auto;min-height:0;max-height:none;overscroll-behavior:contain}
   .add{flex:none}
-  .day.today{border-color:var(--accent)}
+  .day.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--shadow)}
   .day.drop{background:var(--accent-soft);border-color:var(--accent)}
   .day.flash{animation-name:flashCard}
-  @keyframes flashCard{0%,35%{background:var(--accent-soft)}100%{background:var(--surface)}}
+  @keyframes flashCard{0%,35%{background:var(--accent-soft)}100%{background:var(--fill)}}
 }
 
 /* Month */
@@ -276,6 +287,7 @@ button{font:inherit;color:inherit}
 .mcell.sat .mnum{color:var(--sat)}
 .mcell.sun .mnum{color:var(--sun)}
 .mcell.today .mnum{background:var(--accent);color:var(--accent-fg);opacity:1}
+.mcell.today,.mcell.today:hover{background:var(--today-bg)}
 .mlist{display:flex;flex-direction:column;gap:3px;min-width:0}
 .ml{display:block;position:relative;padding-left:9px;font-size:12px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg-2)}
 .ml::before{content:"";position:absolute;left:0;top:.52em;width:4px;height:4px;border-radius:50%;background:var(--accent)}
