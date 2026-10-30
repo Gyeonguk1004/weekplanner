@@ -13,6 +13,8 @@ const WIDE = matchMedia('(min-width: 880px)');
 const PLUS = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
 const XICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
 const SUBICON = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 3v5.5A1.5 1.5 0 0 0 5.5 10H12M9.5 7.5 12 10l-2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const COPYICON = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8.25" height="8.25" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10.6 3.2A1.6 1.6 0 0 0 9.1 2.1H4.1A1.6 1.6 0 0 0 2.5 3.7v5c0 .75.5 1.38 1.2 1.55" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const MOREICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.5" cy="8" r="1.4"/></svg>';
 
 /* ---------- dates (local time) ---------- */
 const pad = n => String(n).padStart(2, '0');
@@ -22,10 +24,11 @@ const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 
 const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
 const mondayOf = d => addDays(d, -((d.getDay() + 6) % 7));
 const firstOfMonth = d => new Date(d.getFullYear(), d.getMonth(), 1);
+const dayName = d => DOW[(d.getDay() + 6) % 7];
 const todayStr = () => ymd(new Date());
 const short = ds => { const d = parse(ds); return `${d.getMonth() + 1}.${d.getDate()}`; };
 const weekLabel = mon => { const thu = addDays(mon, 3); return `${thu.getMonth() + 1}월 ${Math.ceil(thu.getDate() / 7)}주차`; };
-const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ---------- screens ---------- */
 const screens = { boot: $('#boot'), setup: $('#setup'), login: $('#login'), app: $('#app') };
@@ -39,9 +42,12 @@ const state = { view: 'week', anchor: mondayOf(new Date()), mode: 'loading', rea
   if (v === 'month') { state.view = 'month'; state.anchor = firstOfMonth(new Date()); }
 }
 
-const store = new Map();            // 'YYYY-MM-DD' -> items
+const store = new Map();            // 'YYYY-MM-DD' -> items (stored order)
 const dirty = new Set();            // changed locally, not yet sent to Firestore
+const settling = new Set();         // just checked: stays in place a moment so the strike-through shows, then sinks
+const justCopied = new Map();       // new copy id -> time, so its arrow draws in once
 let pending = 0;                    // writes sent but not yet confirmed by the server
+let focusG = null;                  // copy chain under the pointer
 let F = null, auth = null, db = null, col = null, currentUid = null;
 let unsub = null, sub = null, loadedRange = null, loadFallback = 0, flushTimer = 0;
 
@@ -51,6 +57,19 @@ const clean = items => Array.isArray(items)
       .map(it => pack({ id: it.id.slice(0, 40), text: it.text.slice(0, 300), done: it.done, sub: !!it.sub, group: typeof it.group === 'string' ? it.group.slice(0, 40) : '' }))
   : [];
 const blockEnd = (items, i) => { let j = i + 1; if (!items[i].sub) while (j < items.length && items[j].sub) j++; return j; };
+
+// Display order: open tasks first, then completed ones. A task moves with its sub-tasks;
+// a sub-task being done never moves anything.
+function displayOrder(items) {
+  const open = [], closed = [];
+  for (let i = 0; i < items.length;) {
+    const end = blockEnd(items, i), head = items[i];
+    const done = !head.sub && head.done && !settling.has(head.id);
+    (done ? closed : open).push(...items.slice(i, end));
+    i = end;
+  }
+  return { list: open.concat(closed), doneFrom: open.length };
+}
 
 const isLoaded = ds => state.mode === 'db' && !!loadedRange && ds >= loadedRange.a && ds <= loadedRange.b;
 const canEdit = ds => isLoaded(ds) && !state.readonly;
@@ -173,9 +192,12 @@ function addItem(ds, raw) {
   const text = raw.trim().slice(0, 300);
   if (!text || !canEdit(ds)) return false;
   const items = store.get(ds) || [];
-  const it = { id: newId(), text, done: false };
-  if (asSub && items.some(x => !x.sub)) it.sub = true;
-  store.set(ds, [...items, it]);
+  if (asSub) {
+    // "바로 위 할 일" = the last task shown above the input
+    const { list } = displayOrder(items);
+    for (let k = list.length - 1; k >= 0; k--) if (!list[k].sub) return addSub(ds, list[k].id, text);
+  }
+  store.set(ds, [...items, { id: newId(), text, done: false }]);
   touch(ds); return true;
 }
 function addSub(ds, parentId, raw) {
@@ -193,7 +215,13 @@ function toggleItem(ds, id, done) {
   const i = items.findIndex(x => x.id === id);
   if (i < 0) return;
   items[i].done = done;
-  if (!items[i].sub) for (let j = i + 1; j < items.length && items[j].sub; j++) items[j].done = done;
+  if (!items[i].sub) {
+    for (let j = i + 1; j < items.length && items[j].sub; j++) items[j].done = done;
+    if (done) {
+      settling.add(id);
+      setTimeout(() => { if (settling.delete(id)) render(); }, 450);
+    } else settling.delete(id);
+  }
   store.set(ds, items); touch(ds);
 }
 function removeItem(ds, id) {
@@ -214,8 +242,9 @@ function removeItem(ds, id) {
     store.set(ds, cur); touch(ds);
   });
 }
-function copyItem(src, id, dst, index) {
-  if (!canEdit(src) || !canEdit(dst)) return;
+// index: stored position to insert before, or -1 for "after the open tasks" (which is the end)
+function copyItem(src, id, dst, index, force) {
+  if (!canEdit(src) || (!force && !canEdit(dst))) return;
   const sItems = (store.get(src) || []).map(x => ({ ...x }));
   const i = sItems.findIndex(x => x.id === id);
   if (i < 0) return;
@@ -230,16 +259,34 @@ function copyItem(src, id, dst, index) {
   dItems.splice(at, 0, ...copies);
   store.set(src, sItems);
   if (src !== dst) store.set(dst, dItems);
+  const cid = copies[0].id;
+  justCopied.set(cid, performance.now());
+  setTimeout(() => justCopied.delete(cid), 1500);
   if (src !== dst && !hadGroup) touch(src);
   touch(dst);
   const d = parse(dst);
-  toast(`${d.getMonth() + 1}월 ${d.getDate()}일로 복사했어요`, '되돌리기', () => {
+  toast(`${d.getMonth() + 1}월 ${d.getDate()}일(${dayName(d)})로 복사했어요`, '되돌리기', () => {
     const ids = new Set(copies.map(c => c.id));
     store.set(dst, (store.get(dst) || []).filter(x => !ids.has(x.id)));
     if (!hadGroup) store.set(src, (store.get(src) || []).map(x => { if (x.id !== id) return x; const y = { ...x }; delete y.group; return y; }));
     if (src !== dst && !hadGroup) touch(src);
     touch(dst);
   });
+}
+// Copy to any date. A date outside the loaded weeks is read first so nothing there is overwritten.
+async function copyTo(src, id, dst) {
+  if (!canEdit(src)) return;
+  if (!canEdit(dst)) {
+    if (state.readonly) return;
+    try {
+      const snap = await F.getDoc(F.doc(col, dst));
+      if (!dirty.has(dst)) store.set(dst, clean(snap.exists() ? (snap.data() || {}).items : []));
+    } catch (e) {
+      toast('그 날짜의 할 일을 불러오지 못해서 복사하지 못했어요. 인터넷 연결을 확인해 주세요.');
+      return;
+    }
+  }
+  copyItem(src, id, dst, -1, true);
 }
 
 /* ---------- chains: a task and its copies, ordered earlier → later ---------- */
@@ -253,16 +300,17 @@ function computeChains() {
   });
   chainPairs = []; chainNbr = new Map();
   const nb = id => { let o = chainNbr.get(id); if (!o) chainNbr.set(id, o = {}); return o; };
-  groups.forEach(list => {
+  groups.forEach((list, g) => {
     if (list.length < 2) return;
     list.sort((a, b) => a.ds < b.ds ? -1 : a.ds > b.ds ? 1 : a.idx - b.idx);
     for (let k = 0; k < list.length - 1; k++) {
       const a = list[k], b = list[k + 1];
-      chainPairs.push([a.id, b.id]);
+      chainPairs.push([a.id, b.id, g]);
       nb(a.id).next = b.ds; nb(b.id).prev = a.ds;
     }
   });
 }
+const hasNext = id => { const n = chainNbr.get(id); return !!(n && n.next); };
 
 /* ---------- rendering ---------- */
 const vp = $('#viewport'), track = $('#track'), panes = [...track.children];
@@ -287,10 +335,13 @@ function makeItem(it, interactive) {
   li.className = 'item'; li.dataset.id = it.id;
   const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'cb';
   const lab = document.createElement('label'); lab.className = 'text';
-  lab.innerHTML = '<span class="t"></span><span class="lk lk-p"></span><span class="lk lk-n"></span>';
+  lab.innerHTML = '<span class="t"></span><button type="button" class="lk lk-p"></button><button type="button" class="lk lk-n"></button>';
   if (interactive) { cb.id = 'cb-' + it.id; lab.htmlFor = cb.id; }
   const acts = document.createElement('span'); acts.className = 'acts';
-  acts.innerHTML = `<button type="button" class="subadd" aria-label="세부 업무 추가">${SUBICON}</button><button type="button" class="del">${XICON}</button>`;
+  acts.innerHTML = `<button type="button" class="copyto" aria-label="다른 날로 복사" title="다른 날로 복사" aria-haspopup="menu">${COPYICON}</button>`
+    + `<button type="button" class="subadd" aria-label="세부 업무 추가" title="세부 업무 추가">${SUBICON}</button>`
+    + `<button type="button" class="del" title="지우기">${XICON}</button>`
+    + `<button type="button" class="more" aria-label="더 보기" aria-haspopup="menu">${MOREICON}</button>`;
   li.append(cb, lab, acts);
   return li;
 }
@@ -304,7 +355,20 @@ function makeSubForm() {
 
 const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
 
+function setLink(btn, ds, arrow) {
+  if (!ds) { setText(btn, ''); return; }
+  setText(btn, arrow === 'next' ? `→ ${short(ds)}` : `← ${short(ds)}`);
+  btn.dataset.date = ds;
+  const d = parse(ds);
+  btn.title = `${d.getMonth() + 1}월 ${d.getDate()}일(${dayName(d)})로 가기`;
+}
+
 function reconcile(ul, rows, interactive, ds, ws, we) {
+  // FLIP: remember where each row was, so moved rows glide to their new place
+  const flip = interactive && !REDUCED && ul.children.length > 0 && typeof Element.prototype.animate === 'function';
+  const before = flip ? new Map() : null;
+  if (flip) for (const li of ul.children) before.set(li.dataset.id, li.getBoundingClientRect().top);
+
   const old = new Map();
   for (const li of ul.children) old.set(li.dataset.id, li);
   let ref = ul.firstChild;
@@ -312,6 +376,7 @@ function reconcile(ul, rows, interactive, ds, ws, we) {
   for (const it of rows) {
     let li = old.get(it.id);
     if (li) old.delete(it.id); else li = it.form ? makeSubForm() : makeItem(it, interactive);
+    li.classList.toggle('sunk', !!it.sunk);
     if (!it.form) {
       const t = li.querySelector('.t');
       if (t.textContent !== it.text) { t.textContent = it.text; li.querySelector('.del').setAttribute('aria-label', `‘${it.text}’ 지우기`); }
@@ -320,15 +385,29 @@ function reconcile(ul, rows, interactive, ds, ws, we) {
       cb.disabled = !editable;
       li.classList.toggle('sub', !!it.sub);
       li.classList.toggle('done', !!it.done);
+      li.classList.toggle('moved', !!it.moved);
+      li.dataset.g = it.group || '';
       const nb = chainNbr.get(it.id) || {};
-      setText(li.querySelector('.lk-p'), nb.prev && nb.prev < ws ? `← ${short(nb.prev)}` : '');
-      setText(li.querySelector('.lk-n'), nb.next && nb.next > we ? `→ ${short(nb.next)}` : '');
+      setLink(li.querySelector('.lk-p'), nb.prev && nb.prev < ws ? nb.prev : '', 'prev');
+      setLink(li.querySelector('.lk-n'), nb.next && nb.next > we ? nb.next : '', 'next');
       li.querySelector('.acts').hidden = !editable;
       li.querySelector('.subadd').hidden = !!it.sub;
     }
     if (li !== ref) ul.insertBefore(li, ref); else ref = ref.nextSibling;
   }
   old.forEach(li => li.remove());
+
+  if (flip) {
+    const anims = [];
+    for (const li of ul.children) {
+      const b = before.get(li.dataset.id);
+      if (b == null) continue;
+      const dy = b - li.getBoundingClientRect().top;
+      if (Math.abs(dy) < 1) continue;
+      anims.push(li.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.2,.75,.25,1)' }));
+    }
+    if (anims.length) Promise.all(anims.map(a => a.finished.catch(() => {}))).then(scheduleLinks);
+  }
 }
 
 function fillWeek(p, mon, interactive) {
@@ -349,10 +428,16 @@ function fillWeek(p, mon, interactive) {
     const items = store.get(ds) || [];
     const done = items.filter(x => x.done).length;
     setText($('.cnt', sec), items.length ? `${done}/${items.length}` : '');
-    const rows = [...items];
+    const { list, doneFrom } = displayOrder(items);
+    let parentMoved = false;
+    const rows = list.map((it, k) => {
+      const mv = hasNext(it.id);
+      if (!it.sub) parentMoved = mv;
+      return { ...it, moved: it.sub ? parentMoved || mv : mv, sunk: k >= doneFrom };
+    });
     if (interactive && state.subEdit && state.subEdit.date === ds) {
-      const pi = items.findIndex(x => x.id === state.subEdit.parent);
-      if (pi >= 0 && !items[pi].sub && canEdit(ds)) rows.splice(blockEnd(items, pi), 0, { id: '__sub', form: true });
+      const pi = rows.findIndex(x => x.id === state.subEdit.parent);
+      if (pi >= 0 && !rows[pi].sub && canEdit(ds)) rows.splice(blockEnd(rows, pi), 0, { id: '__sub', form: true, sunk: rows[pi].sunk });
       else state.subEdit = null;
     }
     reconcile($('.items', sec), rows, interactive, ds, ws, we);
@@ -373,16 +458,19 @@ function fillMonth(p, first, interactive) {
   for (let i = 0; i < days; i++) {
     const d = addDays(start, i), ds = ymd(d), w = i % 7;
     const items = store.get(ds) || [];
-    const tops = items.filter(x => !x.sub);
+    const tops = displayOrder(items).list.filter(x => !x.sub);
     const done = items.filter(x => x.done).length;
     const cls = ['mcell'];
     if (d.getMonth() !== first.getMonth()) cls.push('out');
     if (ds === t) cls.push('today');
     if (w === 5) cls.push('sat');
     if (w === 6) cls.push('sun');
-    const lines = tops.slice(0, 3).map(it => `<span class="ml${it.done ? ' done' : ''}">${esc(it.text)}</span>`).join('')
-      + (tops.length > 3 ? `<span class="more">+${tops.length - 3}개</span>` : '');
-    const dots = tops.slice(0, 6).map(it => `<i${it.done ? ' class="on"' : ''}></i>`).join('');
+    const lines = tops.slice(0, 3).map(it => `<span class="ml${it.done ? ' done' : ''}${hasNext(it.id) ? ' moved' : ''}">${esc(it.text)}</span>`).join('')
+      + (tops.length > 3 ? `<span class="more-n">+${tops.length - 3}개</span>` : '');
+    const dots = tops.slice(0, 6).map(it => {
+      const c = [it.done ? 'on' : '', hasNext(it.id) ? 'mv' : ''].filter(Boolean).join(' ');
+      return `<i${c ? ` class="${c}"` : ''}></i>`;
+    }).join('');
     const label = `${d.getMonth() + 1}월 ${d.getDate()}일 ${DOW[w]}요일` + (items.length ? `, 할 일 ${items.length}개 중 ${done}개 완료` : '') + ', 주간 보기로 열기';
     html += `<button type="button" class="${cls.join(' ')}" data-date="${ds}" aria-label="${label}"${interactive ? '' : ' tabindex="-1"'}><span class="mnum">${d.getDate()}</span><span class="mlist">${lines}</span><span class="mdots">${dots}</span></button>`;
   }
@@ -399,38 +487,115 @@ function renderPane(p, anchor, interactive) {
   else fillMonth(p, anchor, interactive);
 }
 
+/* ---------- arrows ---------- */
+// Orthogonal path with rounded corners through the given points.
+function roundPath(pts, r) {
+  const P = [];
+  for (const p of pts) { const q = P[P.length - 1]; if (!q || Math.abs(q[0] - p[0]) > 0.3 || Math.abs(q[1] - p[1]) > 0.3) P.push(p); }
+  for (let i = P.length - 2; i > 0; i--) {
+    const [x0, y0] = P[i - 1], [x1, y1] = P[i], [x2, y2] = P[i + 1];
+    const cross = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1);
+    const dot = (x1 - x0) * (x2 - x1) + (y1 - y0) * (y2 - y1);
+    if (Math.abs(cross) < 0.5 && dot > 0) P.splice(i, 1);
+  }
+  if (P.length < 2) return '';
+  const f = n => n.toFixed(1);
+  let d = `M${f(P[0][0])} ${f(P[0][1])}`;
+  for (let i = 1; i < P.length - 1; i++) {
+    const [x0, y0] = P[i - 1], [x1, y1] = P[i], [x2, y2] = P[i + 1];
+    const l1 = Math.hypot(x1 - x0, y1 - y0), l2 = Math.hypot(x2 - x1, y2 - y1);
+    const rr = Math.min(r, l1 / 2, l2 / 2);
+    const ax = x1 - (x1 - x0) / l1 * rr, ay = y1 - (y1 - y0) / l1 * rr;
+    const bx = x1 + (x2 - x1) / l2 * rr, by = y1 + (y2 - y1) / l2 * rr;
+    d += ` L${f(ax)} ${f(ay)} Q${f(x1)} ${f(y1)} ${f(bx)} ${f(by)}`;
+  }
+  const z = P[P.length - 1];
+  return d + ` L${f(z[0])} ${f(z[1])}`;
+}
+
+// Arrows leave the earlier task, run through the gaps between days (or along the line under
+// the day headings when they skip days), and arrive at the later task's checkbox.
 function drawLinks(p, pi) {
   const wk = p.querySelector('.week');
   if (!wk) return;
   let svg = wk.querySelector(':scope > svg.links');
   if (!svg) { svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'links'); svg.setAttribute('aria-hidden', 'true'); wk.appendChild(svg); }
-  const base = wk.getBoundingClientRect();
-  const ox = base.left + wk.clientLeft, oy = base.top + wk.clientTop;
+  if (!chainPairs.length) { if (svg.firstChild) svg.textContent = ''; svg.classList.remove('focus'); return; }
   const lis = new Map();
   wk.querySelectorAll('.item[data-id]').forEach(li => { if (!li.classList.contains('subform')) lis.set(li.dataset.id, li); });
-  const bulge = WIDE.matches ? 10 : 13;
-  let d = '';
-  for (const [a, b] of chainPairs) {
+  const base = wk.getBoundingClientRect();
+  const ox = base.left + wk.clientLeft, oy = base.top + wk.clientTop;
+  const wide = WIDE.matches, gap = 8;
+  const cache = new Map();
+  const geo = li => {
+    let G = cache.get(li);
+    if (G) return G;
+    const day = li.closest('.day'), ul = li.parentElement;
+    const cr = day.getBoundingClientRect(), ur = ul.getBoundingClientRect();
+    const cb = li.querySelector('.cb').getBoundingClientRect(), dh = day.querySelector('.dh').getBoundingClientRect();
+    const raw = cb.top + cb.height / 2, lo = ur.top + 6, hi = ur.bottom - 6;
+    G = { day, L: cr.left - ox, R: cr.right - ox, cbx: cb.left - ox, y: Math.min(hi, Math.max(lo, raw)) - oy, off: raw < lo || raw > hi, rail: dh.bottom - oy };
+    cache.set(li, G);
+    return G;
+  };
+  const lanes = new Map();
+  const lane = key => { const n = lanes.get(key) || 0; lanes.set(key, n + 1); return n; };
+  const spread = n => [0, -2.5, 2.5][n % 3];
+  const now = performance.now(), f = n => n.toFixed(1);
+  let out = '', anyHl = false;
+  for (const [a, b, g] of chainPairs) {
     const la = lis.get(a), lb = lis.get(b);
     if (!la || !lb) continue;
-    const ra = la.getBoundingClientRect(), rb = lb.getBoundingClientRect();
-    const ca = la.querySelector('.cb').getBoundingClientRect(), cbx = lb.querySelector('.cb').getBoundingClientRect();
-    const ya = ca.top + ca.height / 2 - oy, yb = cbx.top + cbx.height / 2 - oy;
-    if (ra.right < rb.left - 1) {
-      const sx = ra.right - ox + 1, ex = cbx.left - ox - 4;
-      const dx = Math.max(20, (ex - sx) * 0.45);
-      d += `<path class="ln" d="M${sx.toFixed(1)} ${ya.toFixed(1)} C${(sx + dx).toFixed(1)} ${ya.toFixed(1)}, ${(ex - dx).toFixed(1)} ${yb.toFixed(1)}, ${ex.toFixed(1)} ${yb.toFixed(1)}" marker-end="url(#ah${pi})"/>`;
+    const A = geo(la), B = geo(lb);
+    const tip = B.cbx - 2, end = tip - 5;
+    let pts, sx;
+    if (wide && B.L > A.R - 1) {
+      // later day is in a column to the right
+      sx = A.R - 6;
+      const g1 = A.R + gap / 2 + spread(lane('g' + Math.round(A.R)));
+      const g2 = B.L - gap / 2 + spread(lane('g' + Math.round(B.L - gap)));
+      if (B.L - A.R < gap * 2) pts = [[sx, A.y], [g1, A.y], [g1, B.y], [end, B.y]];
+      else {
+        const ry = A.rail + 4 + Math.min(lane('rail'), 2) * 3;
+        pts = [[sx, A.y], [g1, A.y], [g1, ry], [g2, ry], [g2, B.y], [end, B.y]];
+      }
     } else {
-      const x1 = ra.right - ox + 2, x2 = rb.right - ox + 2, bx = Math.max(x1, x2) + bulge;
-      d += `<path class="ln" d="M${x1.toFixed(1)} ${ya.toFixed(1)} C${bx.toFixed(1)} ${ya.toFixed(1)}, ${bx.toFixed(1)} ${yb.toFixed(1)}, ${x2.toFixed(1)} ${yb.toFixed(1)}" marker-end="url(#ah${pi})"/>`;
+      // same column (phone, Sat → Sun, or the same day): a bracket on the left
+      const k = Math.min(lane(wide ? 'c' + Math.round(A.L) : 'col'), 2);
+      const bx = wide ? A.L - gap / 2 + spread(k) : Math.min(A.cbx, B.cbx) - 12 - k * 3;
+      sx = A.cbx - 4;
+      pts = [[sx, A.y], [bx, A.y], [bx, B.y], [end, B.y]];
     }
+    const d = roundPath(pts, wide ? 6 : 5);
+    if (!d) continue;
+    const head = `M${f(tip - 6.5)} ${f(B.y - 4)} L${f(tip)} ${f(B.y)} L${f(tip - 6.5)} ${f(B.y + 4)} Z`;
+    const t0 = justCopied.get(b);
+    const isNew = !REDUCED && t0 != null && now - t0 < 900;
+    const hl = !!focusG && g === focusG;
+    if (hl) anyHl = true;
+    out += `<g class="lnk${A.off || B.off ? ' off' : ''}${isNew ? ' new' : ''}${hl ? ' hl' : ''}" data-g="${esc(g)}"${isNew ? ` style="--d:${-Math.round(now - t0)}ms"` : ''}>`
+      + `<path class="ln"${isNew ? ' pathLength="1"' : ''} d="${d}"/>`
+      + `<circle class="dot" cx="${f(sx)}" cy="${f(A.y)}" r="2.5"/>`
+      + `<path class="hd" d="${head}"/></g>`;
   }
-  svg.innerHTML = d ? `<defs><marker id="ah${pi}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="ah" d="M2 1.5 8.5 5 2 8.5"/></marker></defs>${d}` : '';
+  svg.innerHTML = out;
+  svg.classList.toggle('focus', anyHl);
 }
 let linksRaf = 0;
 function scheduleLinks() {
   cancelAnimationFrame(linksRaf);
   linksRaf = requestAnimationFrame(() => panes.forEach((p, i) => drawLinks(p, i)));
+}
+function setFocus(g) {
+  if (g === focusG) return;
+  focusG = g;
+  panes.forEach(p => {
+    const svg = p.querySelector('svg.links');
+    if (!svg) return;
+    let any = false;
+    svg.querySelectorAll('.lnk').forEach(el => { const on = !!g && el.dataset.g === g; el.classList.toggle('hl', on); if (on) any = true; });
+    svg.classList.toggle('focus', any);
+  });
 }
 
 function countRange(a, n) {
@@ -442,9 +607,13 @@ function countRange(a, n) {
   return [done, total];
 }
 
+const HINT_KEY = 'wp.hint2';
 let hintClosed = false;
-try { hintClosed = localStorage.getItem('wp.hint') === '1'; } catch (e) {}
-if (TOUCH) $('#tip-copy').textContent = '할 일을 길게 누른 채 다른 요일로 끌면 복사되고, 먼저 날짜에서 나중 날짜로 화살표가 이어져요. 화면 왼쪽·오른쪽 끝까지 끌고 가면 다른 주로 넘어가요.';
+try { hintClosed = localStorage.getItem(HINT_KEY) === '1'; } catch (e) {}
+if (TOUCH) {
+  $('#tip-menu').textContent = '할 일 옆 ⋯ 버튼을 누르면 다음 날이나 다음 주로 넘길 수 있어요. 넘기고 남은 할 일은 흐려지고, 화살표로 이어져요.';
+  $('#tip-copy').textContent = '할 일을 길게 누른 채 다른 요일로 끌어도 복사돼요. 화면 양쪽 끝으로 끌고 가면 지난주·다음 주로 넘어가요.';
+}
 
 function renderHeader() {
   const now = new Date();
@@ -490,17 +659,22 @@ function render() {
   fitHeight();
   scheduleLinks();
   setSync();
+  if (menuFor && !menuFor.btn.isConnected) closeMenu(false);
 }
 
 if ('ResizeObserver' in window) new ResizeObserver(() => { fitHeight(); scheduleLinks(); }).observe(panes[1]);
-window.addEventListener('resize', scheduleLinks);
+window.addEventListener('resize', () => { scheduleLinks(); closeMenu(false); });
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { fitHeight(); scheduleLinks(); });
+// a day's list scrolled: arrows follow, an open menu stays with its button
+track.addEventListener('scroll', () => { scheduleLinks(); placeMenu(); }, true);
+window.addEventListener('scroll', () => placeMenu(), { passive: true });
 
 /* ---------- navigation ---------- */
 let animating = false;
 
-function slide(dir, target) {
+function slide(dir, target, after) {
   if (animating) return;
+  closeMenu(false);
   const next = target || paneAnchor(dir);
   if (target) renderPane(panes[dir > 0 ? 2 : 0], target, false);
   const finish = () => {
@@ -512,6 +686,8 @@ function slide(dir, target) {
     render();
     void track.offsetWidth;
     animating = false;
+    if (cdrag && cdrag.active) placeEdges();
+    if (after) after();
   };
   if (REDUCED) { finish(); return; }
   animating = true;
@@ -538,6 +714,7 @@ function goToday() {
 
 function setView(v, anchor) {
   if (animating) return;
+  closeMenu(false);
   const prevView = state.view;
   state.view = v;
   state.subEdit = null;
@@ -556,14 +733,22 @@ function setView(v, anchor) {
   render();
 }
 
-function openDay(ds) {
-  setView('week', mondayOf(parse(ds)));
+function flashDay(ds) {
   requestAnimationFrame(() => {
     const sec = panes[1].querySelector(`.day[data-date="${ds}"]`);
     if (!sec) return;
     sec.classList.remove('flash'); void sec.offsetWidth; sec.classList.add('flash');
     if (!WIDE.matches) sec.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' });
   });
+}
+function openDay(ds) { setView('week', mondayOf(parse(ds))); flashDay(ds); }
+// Jump to a date's week; slide when it is the week next door.
+function goToDate(ds) {
+  const mon = mondayOf(parse(ds));
+  const diff = Math.round((mon - state.anchor) / (7 * 864e5));
+  if (state.view === 'week' && diff === 0) { flashDay(ds); return; }
+  if (state.view === 'week' && Math.abs(diff) === 1) slide(diff, null, () => flashDay(ds));
+  else openDay(ds);
 }
 
 $('#prev').addEventListener('click', () => slide(-1));
@@ -573,20 +758,119 @@ $('#v-week').addEventListener('click', () => { if (state.view !== 'week') setVie
 $('#v-month').addEventListener('click', () => { if (state.view !== 'month') setView('month'); });
 $('#hint-close').addEventListener('click', () => {
   hintClosed = true; $('#hint').hidden = true;
-  try { localStorage.setItem('wp.hint', '1'); } catch (e) {}
+  try { localStorage.setItem(HINT_KEY, '1'); } catch (e) {}
 });
 window.addEventListener('hashchange', () => {
   const v = location.hash === '#month' ? 'month' : location.hash === '#week' ? 'week' : null;
   if (v && v !== state.view) setView(v);
 });
 
+/* ---------- copy menu ---------- */
+const menu = $('#menu');
+let menuFor = null;   // { btn, li, ds, id }
+
+function closeMenu(refocus) {
+  if (!menuFor) return;
+  const { btn, li } = menuFor;
+  menuFor = null;
+  menu.hidden = true; menu.textContent = '';
+  btn.classList.remove('open'); btn.setAttribute('aria-expanded', 'false');
+  li.classList.remove('menuing');
+  if (refocus && btn.isConnected) btn.focus();
+}
+function placeMenu() {
+  if (!menuFor) return;
+  const r = menuFor.btn.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight || (!r.width && !r.height)) { closeMenu(false); return; }
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const left = Math.min(innerWidth - mw - 8, Math.max(8, r.right - mw));
+  let top = r.bottom + 6;
+  if (top + mh > innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+  menu.style.left = `${left}px`; menu.style.top = `${top}px`;
+}
+function openMenu(btn, ds, id, full) {
+  closeMenu(false);
+  const items = store.get(ds) || [];
+  const it = items.find(x => x.id === id);
+  if (!it) return;
+  const li = btn.closest('.item');
+  const d = parse(ds);
+  const lab = dd => `${dd.getMonth() + 1}.${dd.getDate()} ${dayName(dd)}`;
+  const nextDay = addDays(d, 1), nextWeek = addDays(d, 7), nextMon = addDays(mondayOf(d), 7);
+  menu.textContent = '';
+  const item = (html, fn, cls) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mi' + (cls ? ' ' + cls : ''); b.setAttribute('role', 'menuitem');
+    b.innerHTML = html; b.addEventListener('click', fn);
+    menu.appendChild(b);
+  };
+  const heading = t => { const h = document.createElement('div'); h.className = 'mh'; h.textContent = t; menu.appendChild(h); };
+  const rule = () => { const s = document.createElement('div'); s.className = 'msep'; menu.appendChild(s); };
+  const go = dd => { closeMenu(false); copyTo(ds, id, ymd(dd)); };
+
+  if (full && !it.sub) { item('<span>세부 업무 추가</span>', () => { closeMenu(false); openSub(ds, id); }); rule(); }
+  heading('복사해서 넘기기');
+  item(`<span>다음 날</span><em>${lab(nextDay)}</em>`, () => go(nextDay));
+  item(`<span>다음 주 같은 요일</span><em>${lab(nextWeek)}</em>`, () => go(nextWeek));
+  if (ymd(nextMon) !== ymd(nextWeek)) item(`<span>다음 주 월요일</span><em>${lab(nextMon)}</em>`, () => go(nextMon));
+  const row = document.createElement('div');
+  row.className = 'mdate';
+  row.innerHTML = '<span>날짜 고르기</span><input type="date" id="copy-date" name="copy-date" aria-label="복사할 날짜"><button type="button">복사</button>';
+  const inp = row.querySelector('input');
+  inp.value = ymd(addDays(d, 1));
+  row.querySelector('button').addEventListener('click', () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inp.value)) { inp.focus(); return; }
+    go(parse(inp.value));
+  });
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); row.querySelector('button').click(); } });
+  menu.appendChild(row);
+  if (full) { rule(); item('<span>지우기</span>', () => { closeMenu(false); removeItem(ds, id); }, 'danger'); }
+
+  menuFor = { btn, li, ds, id };
+  btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+  li.classList.add('menuing');
+  menu.hidden = false;
+  placeMenu();
+  const first = menu.querySelector('.mi');
+  if (first) first.focus({ preventScroll: true });
+}
+menu.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); return; }
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const list = [...menu.querySelectorAll('button.mi, .mdate input, .mdate button')];
+  const i = list.indexOf(document.activeElement);
+  const n = e.key === 'ArrowDown' ? (i + 1) % list.length : (i - 1 + list.length) % list.length;
+  list[n].focus();
+});
+document.addEventListener('pointerdown', e => {
+  if (menuFor && !menu.contains(e.target) && !menuFor.btn.contains(e.target)) closeMenu(false);
+}, true);
+
+function openSub(ds, id) {
+  const same = state.subEdit && state.subEdit.parent === id;
+  state.subEdit = same ? null : { date: ds, parent: id };
+  render();
+  const si = $('#sub-input');
+  if (si && !same) { si.value = ''; si.focus(); }
+}
+
 /* ---------- pointer: swipe weeks, Ctrl-drag (or long-press) to copy ---------- */
-let drag = null, cdrag = null, ghost = null, suppressClick = false;
-const dropLine = $('#dropline');
+let drag = null, cdrag = null, ghost = null, suppressClick = false, autoRaf = 0;
+const dropLine = $('#dropline'), edgeL = $('#edge-l'), edgeR = $('#edge-r');
+const EDGE = 40;
 
 function clearDrop() {
   panes[1].querySelectorAll('.day.drop').forEach(el => el.classList.remove('drop'));
   dropLine.hidden = true;
+}
+function placeEdges() {
+  const r = vp.getBoundingClientRect();
+  const top = Math.max(r.top, 8), bottom = Math.min(r.bottom, innerHeight - 8);
+  const h = Math.max(80, bottom - top);
+  edgeL.style.left = `${r.left + 4}px`; edgeR.style.left = `${r.right - EDGE - 4}px`;
+  for (const el of [edgeL, edgeR]) { el.style.top = `${top}px`; el.style.height = `${h}px`; }
 }
 
 function cdStart(x, y) {
@@ -597,6 +881,7 @@ function cdStart(x, y) {
   if (i < 0) { cdEnd(true); return; }
   const n = blockEnd(items, i) - i - 1;
   cdrag.active = true;
+  closeMenu(false);
   ghost = document.createElement('div');
   ghost.className = 'ghost';
   ghost.innerHTML = '<b aria-hidden="true">+</b><span></span>';
@@ -605,15 +890,29 @@ function cdStart(x, y) {
   li.classList.add('src');
   try { vp.setPointerCapture(cdrag.pid); } catch (e) {}
   document.documentElement.classList.add('copying');
+  placeEdges();
   cdMove(x, y);
+  if (!autoRaf) autoRaf = requestAnimationFrame(autoScroll);
+}
+
+// While dragging near the top or bottom of the screen, scroll the page (long weeks on a phone).
+function autoScroll() {
+  if (!cdrag || !cdrag.active) { autoRaf = 0; return; }
+  const y = cdrag.y, zone = 70;
+  let v = 0;
+  if (y < zone) v = -Math.ceil((zone - y) / 5);
+  else if (y > innerHeight - zone) v = Math.ceil((y - (innerHeight - zone)) / 5);
+  if (v) { const before = scrollY; scrollBy(0, v); if (scrollY !== before) { placeEdges(); cdMove(cdrag.x, cdrag.y); } }
+  autoRaf = requestAnimationFrame(autoScroll);
 }
 
 function cdMove(x, y) {
+  cdrag.x = x; cdrag.y = y;
   ghost.style.transform = `translate(${x + 14}px, ${y + 10}px)`;
   const r = vp.getBoundingClientRect();
-  const edge = x < r.left + 44 ? -1 : x > r.right - 44 ? 1 : 0;
-  vp.classList.toggle('edge-l', edge < 0);
-  vp.classList.toggle('edge-r', edge > 0);
+  const edge = x < r.left + EDGE + 4 ? -1 : x > r.right - EDGE - 4 ? 1 : 0;
+  edgeL.classList.toggle('on', edge < 0);
+  edgeR.classList.toggle('on', edge > 0);
   if (edge !== cdrag.edge) {
     cdrag.edge = edge;
     clearTimeout(cdrag.edgeT);
@@ -634,18 +933,21 @@ function cdMove(x, y) {
   if (!day || !panes[1].contains(day) || !canEdit(day.dataset.date)) return;
   const ds = day.dataset.date, items = store.get(ds) || [];
   const ul = day.querySelector('.items');
+  const ur = ul.getBoundingClientRect();
   let index = -1, lineY = null;
+  // open tasks only: a new copy is never dropped among completed ones
   for (const li of ul.children) {
     if (!li.dataset.id || li.classList.contains('sub')) continue;
     const rr = li.getBoundingClientRect();
+    if (li.classList.contains('sunk')) { lineY = rr.top; break; }
     if (y < rr.top + rr.height / 2) { index = items.findIndex(x2 => x2.id === li.dataset.id); lineY = rr.top; break; }
   }
-  const ur = ul.getBoundingClientRect();
   if (lineY === null) { const lastLi = ul.lastElementChild; lineY = lastLi ? lastLi.getBoundingClientRect().bottom : ur.top + 4; }
+  lineY = Math.min(Math.max(lineY, ur.top + 1), ur.bottom - 1);
   day.classList.add('drop');
   dropLine.hidden = false;
-  dropLine.style.width = `${Math.max(40, ur.width)}px`;
-  dropLine.style.transform = `translate(${ur.left}px, ${lineY - 1}px)`;
+  dropLine.style.width = `${Math.max(40, ur.width - 8)}px`;
+  dropLine.style.transform = `translate(${ur.left + 4}px, ${lineY - 1}px)`;
   cdrag.target = ds; cdrag.index = index;
 }
 
@@ -653,7 +955,7 @@ function cdEnd(cancel) {
   const c = cdrag; cdrag = null;
   if (!c) return;
   clearTimeout(c.edgeT);
-  vp.classList.remove('edge-l', 'edge-r');
+  edgeL.classList.remove('on'); edgeR.classList.remove('on');
   document.documentElement.classList.remove('copying');
   if (ghost) { ghost.remove(); ghost = null; }
   clearDrop();
@@ -666,7 +968,10 @@ function cdEnd(cancel) {
 vp.addEventListener('pointerdown', e => {
   if (animating || drag || cdrag) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  if (e.target.closest('.add, .acts, .subform')) return;
+  if (e.target.closest('.add, .acts, .subform, .lk')) return;
+  // grabbing a list's scrollbar scrolls the list, not the week
+  const sc = e.target.closest('.items');
+  if (sc && e.target === sc && e.offsetX >= sc.clientWidth) return;
   const li = state.view === 'week' ? e.target.closest('.item') : null;
   const day = li && li.closest('.day');
   const copyable = !!(li && day && panes[1].contains(li) && canEdit(day.dataset.date));
@@ -705,6 +1010,7 @@ vp.addEventListener('pointermove', e => {
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(drag.lp);
     if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.2) {
       drag.active = true;
+      closeMenu(false);
       try { vp.setPointerCapture(e.pointerId); } catch (err) {}
       document.documentElement.classList.add('dragging');
       track.style.transition = 'none';
@@ -748,7 +1054,7 @@ vp.addEventListener('click', e => { if (suppressClick) { e.preventDefault(); e.s
 /* ---------- keys ---------- */
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && cdrag) { cdEnd(true); return; }
-  if (screens.app.hidden) return;
+  if (screens.app.hidden || menuFor) return;
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const tg = e.target;
   if (tg && tg.tagName === 'INPUT' && tg.type !== 'checkbox') return;
@@ -764,25 +1070,27 @@ track.addEventListener('change', e => {
   if (li && day) toggleItem(day.dataset.date, li.dataset.id, cb.checked);
 });
 track.addEventListener('click', e => {
-  const del = e.target.closest('.del');
-  if (del) {
-    const li = del.closest('.item'), day = del.closest('.day');
-    if (li && day) removeItem(day.dataset.date, li.dataset.id);
-    return;
-  }
-  const sa = e.target.closest('.subadd');
-  if (sa) {
-    const li = sa.closest('.item'), day = sa.closest('.day');
+  const lk = e.target.closest('.lk');
+  if (lk) { e.preventDefault(); if (lk.dataset.date) goToDate(lk.dataset.date); return; }
+  const btn = e.target.closest('.acts button');
+  if (btn) {
+    const li = btn.closest('.item'), day = btn.closest('.day');
     if (!li || !day) return;
-    const same = state.subEdit && state.subEdit.parent === li.dataset.id;
-    state.subEdit = same ? null : { date: day.dataset.date, parent: li.dataset.id };
-    render();
-    const si = $('#sub-input');
-    if (si && !same) { si.value = ''; si.focus(); }
+    const ds = day.dataset.date, id = li.dataset.id;
+    if (btn.classList.contains('del')) removeItem(ds, id);
+    else if (btn.classList.contains('subadd')) openSub(ds, id);
+    else if (menuFor && menuFor.btn === btn) closeMenu(true);
+    else openMenu(btn, ds, id, btn.classList.contains('more'));
     return;
   }
   const cell = e.target.closest('.mcell');
-  if (cell) openDay(cell.dataset.date);
+  if (cell) { openDay(cell.dataset.date); return; }
+  // a click on the empty part of a day goes to its "할 일 추가" box
+  const day = e.target.closest('.day');
+  if (day && panes[1].contains(day) && (e.target === day || e.target.classList.contains('items'))) {
+    const inp = day.querySelector('.add input');
+    if (inp && !inp.disabled) inp.focus();
+  }
 });
 track.addEventListener('submit', e => {
   e.preventDefault();
@@ -794,7 +1102,19 @@ track.addEventListener('submit', e => {
     inp.focus();
     return;
   }
-  if (addItem(day.dataset.date, inp.value)) inp.value = '';
+  if (addItem(day.dataset.date, inp.value)) {
+    inp.value = '';
+    const ul = day.querySelector('.items');
+    if (ul && ul.scrollHeight > ul.clientHeight) {
+      // keep the new task in view: it sits just above the completed ones
+      requestAnimationFrame(() => {
+        const items = store.get(day.dataset.date) || [];
+        const last = items[items.length - 1];
+        const li = last && ul.querySelector(`.item[data-id="${last.id}"]`);
+        if (li) li.scrollIntoView({ block: 'nearest', behavior: REDUCED ? 'auto' : 'smooth' });
+      });
+    }
+  }
   inp.focus();
 });
 track.addEventListener('keydown', e => {
@@ -808,6 +1128,13 @@ track.addEventListener('focusout', e => {
     if (!si.value.trim()) { state.subEdit = null; render(); }
   }, 150);
 });
+// hovering a task lights up its copy chain
+track.addEventListener('pointerover', e => {
+  if (cdrag || drag) return;
+  const li = e.target.closest && e.target.closest('.item');
+  setFocus(li && li.dataset.g ? li.dataset.g : null);
+});
+track.addEventListener('pointerleave', () => setFocus(null));
 
 /* ---------- toast ---------- */
 let toastTimer = 0, toastAction = null;
@@ -913,7 +1240,7 @@ $('#logout').addEventListener('click', async () => {
 /* ---------- session ---------- */
 function startSession(user) {
   if (currentUid === user.uid) return;
-  stopSub(); store.clear(); dirty.clear();
+  stopSub(); store.clear(); dirty.clear(); settling.clear();
   currentUid = user.uid;
   col = F.collection(db, 'weekplanner', user.uid, 'days');
   Object.assign(state, { mode: 'db', readonly: false, error: false, errorText: '', subEdit: null });
@@ -924,7 +1251,8 @@ function startSession(user) {
   render();
 }
 function endSession() {
-  stopSub(); store.clear(); dirty.clear();
+  closeMenu(false);
+  stopSub(); store.clear(); dirty.clear(); settling.clear();
   currentUid = null; col = null; state.mode = 'loading';
   panes.forEach(p => { p.textContent = ''; delete p.dataset.kind; });
   $('#login-pw').value = '';
